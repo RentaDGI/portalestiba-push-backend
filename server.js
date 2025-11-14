@@ -7,35 +7,28 @@ const app = express();
 const port = process.env.PORT || 5000; // El puerto 5000 es el valor por defecto si no se especifica en el entorno
 
 // =========================================================================
-// ¡IMPORTANTE! Configura el origen de CORS para tu frontend DEPLOGADO o LOCAL
-// En desarrollo: 'http://127.0.0.1:8080'
-// En producción (cuando el frontend esté en un dominio real): 'https://tudominio.com'
-// Si tu frontend aún está en localhost, asegúrate de que el puerto coincida.
-// Para Vercel, es mejor que sea más permisivo con el origen específico o usar una lista.
-// Para un backend desplegado en Vercel, el frontend desplegado llamará a este.
-// Si tu frontend todavía es localhost:8080 y este backend está desplegado:
-// origin: 'http://127.0.0.1:8080'
-// Si tu frontend también está desplegado (ej: en Netlify):
-// origin: 'https://tu-frontend.netlify.app'
-// O para desarrollo y un frontend desplegado:
-// origin: ['http://127.0.0.1:8080', 'https://tu-frontend.netlify.app']
+// ¡¡¡CORRECCIÓN FINAL DE CORS PARA DESARROLLO LOCAL!!!
+// Acepta ambos orígenes (localhost y 127.0.0.1) que Live Server puede usar.
+// Cuando el frontend esté desplegado, deberás cambiar esto a la URL de tu frontend desplegado.
 // =========================================================================
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://127.0.0.1:8080' // <-- Ahora lee del entorno o usa el valor de desarrollo
+    origin: ['http://localhost:8080', 'http://127.0.0.1:8080'], // <--- ¡AQUÍ ESTÁ LA CORRECCIÓN!
+    methods: ['GET', 'POST', 'PUT', 'DELETE'], 
+    allowedHeaders: ['Content-Type', 'Authorization'] 
 }));
 
 app.use(bodyParser.json());
 
 // =========================================================================
 // ¡Tus claves VAPID y email se leen AHORA de las variables de entorno!
-// =BEBES CONFIGURAR VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY y WEB_PUSH_EMAIL en Vercel!
+// (DEBES CONFIGURAR VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY y WEB_PUSH_EMAIL en Vercel!)
 // =========================================================================
 const vapidKeys = {
     publicKey: process.env.VAPID_PUBLIC_KEY, 
     privateKey: process.env.VAPID_PRIVATE_KEY, 
 };
 
-// Verificar que las claves estén disponibles
+// Verificar que las claves estén disponibles (solo para debug en desarrollo)
 if (!vapidKeys.publicKey || !vapidKeys.privateKey) {
     console.error("ERROR: Las claves VAPID (VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY) no están configuradas en las variables de entorno.");
     // En un entorno de producción, podrías querer terminar el proceso aquí.
