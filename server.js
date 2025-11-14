@@ -2,17 +2,19 @@ const express = require('express');
 const webpush = require('web-push');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+// Importar el cliente de Supabase
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
-const port = process.env.PORT || 5000; // El puerto 5000 es el valor por defecto si no se especifica en el entorno
+const port = process.env.PORT || 5000;
 
 // =========================================================================
-// ¡¡¡CORRECCIÓN FINAL DE CORS PARA DESARROLLO LOCAL!!!
-// Acepta ambos orígenes (localhost y 127.0.0.1) que Live Server puede usar.
-// Cuando el frontend esté desplegado, deberás cambiar esto a la URL de tu frontend desplegado.
+// Configuración de CORS para desarrollo local o frontend desplegado.
+// Debería permitir 'http://localhost:8080' y 'http://127.0.0.1:8080' para desarrollo.
+// En producción, debería ser la URL de tu frontend desplegado (ej. 'https://tu-pwa.com').
 // =========================================================================
 app.use(cors({
-    origin: ['http://localhost:8080', 'http://127.0.0.1:8080'], // <--- ¡AQUÍ ESTÁ LA CORRECCIÓN!
+    origin: ['http://localhost:8080', 'http://127.0.0.1:8080'], // Para desarrollo local
     methods: ['GET', 'POST', 'PUT', 'DELETE'], 
     allowedHeaders: ['Content-Type', 'Authorization'] 
 }));
@@ -20,7 +22,23 @@ app.use(cors({
 app.use(bodyParser.json());
 
 // =========================================================================
-// ¡Tus claves VAPID y email se leen AHORA de las variables de entorno!
+// ¡Inicialización de Supabase para el backend!
+// Estas variables de entorno (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+// DEBEN CONFIGURARSE en Vercel.
+// =========================================================================
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseServiceRoleKey) {
+    console.error("ERROR: Las credenciales de Supabase (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) no están configuradas en las variables de entorno.");
+    // No salir en desarrollo, pero es crítico en producción
+    // process.exit(1);
+}
+
+const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
+
+// =========================================================================
+// Configuración de Web-Push (claves VAPID y email leídos de variables de entorno)
 // (DEBES CONFIGURAR VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY y WEB_PUSH_EMAIL en Vercel!)
 // =========================================================================
 const vapidKeys = {
@@ -28,15 +46,11 @@ const vapidKeys = {
     privateKey: process.env.VAPID_PRIVATE_KEY, 
 };
 
-// Verificar que las claves estén disponibles (solo para debug en desarrollo)
 if (!vapidKeys.publicKey || !vapidKeys.privateKey) {
     console.error("ERROR: Las claves VAPID (VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY) no están configuradas en las variables de entorno.");
-    // En un entorno de producción, podrías querer terminar el proceso aquí.
-    // process.exit(1); 
 }
 if (!process.env.WEB_PUSH_EMAIL) {
     console.error("ERROR: El email de Web Push (WEB_PUSH_EMAIL) no está configurado en las variables de entorno.");
-    // process.exit(1);
 }
 
 webpush.setVapidDetails(
@@ -45,51 +59,104 @@ webpush.setVapidDetails(
     vapidKeys.privateKey
 );
 
-// Aquí se guardarán las suscripciones (¡ADVERTENCIA: EN PRODUCCIÓN USA UNA BASE DE DATOS!)
-// Para Vercel (serverless), este array se reiniciará con cada nueva invocación de la función,
-// por lo que es CRÍTICO que en un entorno real uses una base de datos persistente.
-let subscriptions = [];
-
 // ===============================================
-// RUTAS DE LA API PARA NOTIFICACIONES PUSH
+// RUTAS DE LA API PARA NOTIFICACIONES PUSH (Ahora con persistencia en Supabase)
 // ===============================================
 
 // 1. Ruta para guardar la suscripción del usuario (desde el frontend)
-app.post('/api/push/subscribe', (req, res) => {
+app.post('/api/push/subscribe', async (req, res) => {
     const subscription = req.body;
-    // Evitar duplicados si el usuario se suscribe varias veces
-    if (!subscriptions.some(s => s.endpoint === subscription.endpoint)) {
-        subscriptions.push(subscription);
-        console.log('Nueva suscripción registrada:', subscription.endpoint);
-    } else {
-        console.log('Suscripción ya existente:', subscription.endpoint);
+    // El frontend no siempre envía user_chapa, así que puede ser null o undefined
+    const user_chapa = req.body.user_chapa || null; // Opcional
+
+    if (!subscription || !subscription.endpoint || !subscription.keys || !subscription.keys.p256dh || !subscription.keys.auth) {
+        return res.status(400).json({ error: 'Invalid subscription format.' });
     }
-    res.status(201).json({ message: 'Subscription saved.' });
+
+    try {
+        // Intentar insertar la suscripción en Supabase
+        const { data, error } = await supabase
+            .from('push_subscriptions')
+            .upsert({
+                endpoint: subscription.endpoint,
+                p256dh: subscription.keys.p256dh,
+                auth: subscription.keys.auth,
+                user_chapa: user_chapa // Guardar la chapa si se proporciona
+            }, {
+                onConflict: 'endpoint' // Si el endpoint ya existe, actualiza (no crea duplicados)
+            });
+
+        if (error) {
+            console.error('Error al guardar suscripción en Supabase:', error);
+            return res.status(500).json({ error: 'Failed to save subscription.' });
+        }
+
+        console.log('Suscripción registrada/actualizada en Supabase:', subscription.endpoint);
+        res.status(201).json({ message: 'Subscription saved and persisted.' });
+
+    } catch (e) {
+        console.error('Excepción al suscribir:', e);
+        res.status(500).json({ error: 'Internal server error during subscription.' });
+    }
 });
 
 // 2. Ruta para eliminar la suscripción del usuario
-app.post('/api/push/unsubscribe', (req, res) => {
+app.post('/api/push/unsubscribe', async (req, res) => {
     const endpointToRemove = req.body.endpoint;
-    const initialLength = subscriptions.length;
-    subscriptions = subscriptions.filter(s => s.endpoint !== endpointToRemove);
-    if (subscriptions.length < initialLength) {
-        console.log('Suscripción eliminada:', endpointToRemove);
-    } else {
-        console.log('Intento de desuscripción de endpoint no encontrado:', endpointToRemove);
+
+    if (!endpointToRemove) {
+        return res.status(400).json({ error: 'Endpoint is required for unsubscription.' });
     }
-    res.status(200).json({ message: 'Subscription removed.' });
+
+    try {
+        const { error } = await supabase
+            .from('push_subscriptions')
+            .delete()
+            .eq('endpoint', endpointToRemove);
+
+        if (error) {
+            console.error('Error al eliminar suscripción de Supabase:', error);
+            return res.status(500).json({ error: 'Failed to remove subscription.' });
+        }
+
+        console.log('Suscripción eliminada de Supabase:', endpointToRemove);
+        res.status(200).json({ message: 'Subscription removed and unpersisted.' });
+
+    } catch (e) {
+        console.error('Excepción al desuscribir:', e);
+        res.status(500).json({ error: 'Internal server error during unsubscription.' });
+    }
 });
 
-// 3. Ruta para ENVIAR una notificación de "Nueva Contratación"
-// Esta ruta es la que llamará tu Supabase Edge Function
+// 3. Ruta para ENVIAR una notificación de "Nueva Contratación" (llamada por la Edge Function)
 app.post('/api/push/notify-new-hire', async (req, res) => {
-    const { title, body, url } = req.body; 
+    const { title, body, url, chapa_target = null } = req.body; 
     
-    // Validar que hay suscriptores antes de intentar enviar
-    if (subscriptions.length === 0) {
-        console.log('No hay suscriptores registrados en este momento para enviar la notificación.');
+    // 1. Obtener todas las suscripciones persistentes de Supabase
+    let { data: subscriptions, error } = await supabase
+        .from('push_subscriptions')
+        .select('*');
+
+    if (error) {
+        console.error('Error al obtener suscripciones de Supabase:', error);
+        return res.status(500).json({ error: 'Failed to retrieve subscriptions.' });
+    }
+
+    if (!subscriptions || subscriptions.length === 0) {
+        console.log('No hay suscriptores registrados en Supabase para enviar la notificación.');
         return res.status(200).json({ message: 'No active subscriptions to notify.' });
     }
+
+    // Opcional: Filtrar por chapa si la Edge Function envía un user_chapa específico
+    let targetSubscriptions = subscriptions;
+    if (chapa_target) {
+        targetSubscriptions = subscriptions.filter(sub => sub.user_chapa === chapa_target.toString());
+        console.log(`Filtrando notificaciones para chapa_target: ${chapa_target}. Suscripciones encontradas: ${targetSubscriptions.length}`);
+        if (targetSubscriptions.length === 0) {
+            return res.status(200).json({ message: `No active subscriptions found for chapa_target: ${chapa_target}.` });
+        }
+    }
+
 
     const payload = JSON.stringify({
         title: title || '¡Nueva Contratación Disponible!',
@@ -97,32 +164,43 @@ app.post('/api/push/notify-new-hire', async (req, res) => {
         url: url || '/', 
     });
 
-    console.log(`Enviando notificación a ${subscriptions.length} suscriptores...`);
+    console.log(`Enviando notificación a ${targetSubscriptions.length} suscriptores persistentes...`);
 
-    const notificationsPromises = subscriptions.map(async (subscription, index) => {
-        try {
-            await webpush.sendNotification(subscription, payload);
-            console.log(`Notificación enviada a suscriptor ${index + 1}`);
-        } catch (error) {
-            console.error(`Error enviando notificación a suscriptor ${index + 1} (${subscription.endpoint}):`, error);
-            // Si la suscripción falla (ej. usuario desinstaló la PWA, ya no existe, etc.), elimínala
-            if (error.statusCode === 410 || error.statusCode === 404) { // Gone: La suscripción no es válida
-                console.log(`Suscripción inválida/expirada eliminada: ${subscription.endpoint}`);
-                // Marcar para eliminar del array. No podemos modificar el array directamente mientras iteramos con map.
-                return { endpoint: subscription.endpoint, status: 'failed', remove: true };
+    const notificationsPromises = targetSubscriptions.map(async (sub, index) => {
+        const pushSubscription = {
+            endpoint: sub.endpoint,
+            keys: {
+                p256dh: sub.p256dh,
+                auth: sub.auth
             }
-            return { endpoint: subscription.endpoint, status: 'failed', remove: false };
+        };
+        try {
+            await webpush.sendNotification(pushSubscription, payload);
+            console.log(`Notificación enviada a suscriptor ${index + 1} (${sub.endpoint})`);
+            return { endpoint: sub.endpoint, status: 'success', remove: false };
+        } catch (error) {
+            console.error(`Error enviando notificación a suscriptor ${index + 1} (${sub.endpoint}):`, error);
+            // Si la suscripción falla (Gone: 410, Not Found: 404), marcar para eliminar
+            if (error.statusCode === 410 || error.statusCode === 404) {
+                console.log(`Suscripción inválida/expirada eliminada: ${sub.endpoint}`);
+                // Eliminarla directamente de la base de datos
+                await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
+                return { endpoint: sub.endpoint, status: 'failed', remove: true };
+            }
+            return { endpoint: sub.endpoint, status: 'failed', remove: false };
         }
-        return { endpoint: subscription.endpoint, status: 'success', remove: false };
     });
 
     const results = await Promise.all(notificationsPromises);
 
-    // Filtrar suscripciones fallidas que deben ser eliminadas
-    subscriptions = subscriptions.filter(s => !results.some(r => r.remove && r.endpoint === s.endpoint));
-
-    console.log(`Finalizado el envío de notificaciones. Suscripciones restantes: ${subscriptions.length}`);
-    res.status(200).json({ message: 'Notifications sent.', totalSent: results.filter(r => r.status === 'success').length });
+    // Opcional: Podrías querer loggear o responder con los resultados detallados
+    res.status(200).json({ 
+        message: 'Notifications sent.', 
+        totalAttempted: targetSubscriptions.length,
+        totalSent: results.filter(r => r.status === 'success').length,
+        totalRemoved: results.filter(r => r.remove).length,
+        // results: results // Descomentar para debug detallado de cada resultado
+    });
 });
 
 
