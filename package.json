@@ -2,9 +2,9 @@
       "name": "portalestiba-push-backend",
       "version": "1.0.0",
       "description": "Backend for Portal Estiba VLC push notifications",
-      "main": "server.js",       <!-- ¡CORREGIDO: Apunta a server.js! -->
+      "main": "server.js",      
       "scripts": {
-        "start": "node server.js", <!-- ¡AÑADIDO: Script para que Vercel sepa cómo iniciar! -->
+        "start": "node server.js", 
         "test": "echo \"Error: no test specified\" && exit 1"
       },
       "keywords": [],
@@ -12,10 +12,10 @@
       "license": "ISC",
       "type": "commonjs",
       "dependencies": {
-        "body-parser": "^1.20.2",   <!-- Ajustado a versión estable común -->
+        "body-parser": "^1.20.2",   
         "cors": "^2.8.5",
-        "express": "^4.19.2",       <!-- Ajustado a versión estable común -->
+        "express": "^4.19.2",    
         "web-push": "^3.6.7",
-        "@supabase/supabase-js": "^2.39.3" <!-- ¡AÑADIDO: La dependencia de Supabase! -->
+        "@supabase/supabase-js": "^2.39.3"
       }
     }
