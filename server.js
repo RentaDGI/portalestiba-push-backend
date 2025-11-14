@@ -13,7 +13,6 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization'] 
 }));
 
-// ¡CRUCIAL! body-parser debe estar ANTES de definir cualquier ruta.
 app.use(bodyParser.json());
 
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -46,29 +45,18 @@ webpush.setVapidDetails(
 // 1. Ruta para guardar la suscripción del usuario (desde el frontend)
 app.post('/api/push/subscribe', async (req, res) => {
     const subscription = req.body;
-    const user_chapa = req.body.user_chapa || null; // Opcional
+    // Capturamos user_chapa del body, si viene (lo añadiremos en el frontend)
+    const user_chapa = req.body.user_chapa || null; 
 
-    console.log('Received subscription request. Body:', subscription); // DEBUG: Qué recibe el servidor
+    console.log('Received subscription request. Body:', subscription);
 
-    if (!subscription || typeof subscription !== 'object') {
-        console.error('Invalid subscription: Body is not an object.');
-        return res.status(400).json({ error: 'Invalid subscription format: body must be a JSON object.' });
-    }
-    if (!subscription.endpoint || typeof subscription.endpoint !== 'string') {
-        console.error('Invalid subscription: Missing or invalid endpoint.');
-        return res.status(400).json({ error: 'Invalid subscription format: missing or invalid endpoint.' });
-    }
-    if (!subscription.keys || typeof subscription.keys !== 'object') {
-        console.error('Invalid subscription: Missing or invalid keys object.');
-        return res.status(400).json({ error: 'Invalid subscription format: missing or invalid keys object.' });
-    }
-    if (!subscription.keys.p256dh || typeof subscription.keys.p256dh !== 'string') {
-        console.error('Invalid subscription: Missing or invalid p256dh key.');
-        return res.status(400).json({ error: 'Invalid subscription format: missing or invalid p256dh key.' });
-    }
-    if (!subscription.keys.auth || typeof subscription.keys.auth !== 'string') {
-        console.error('Invalid subscription: Missing or invalid auth key.');
-        return res.status(400).json({ error: 'Invalid subscription format: missing or invalid auth key.' });
+    if (!subscription || typeof subscription !== 'object' ||
+        !subscription.endpoint || typeof subscription.endpoint !== 'string' ||
+        !subscription.keys || typeof subscription.keys !== 'object' ||
+        !subscription.keys.p256dh || typeof subscription.keys.p256dh !== 'string' ||
+        !subscription.keys.auth || typeof subscription.keys.auth !== 'string') {
+        console.error('Invalid subscription: Missing or invalid required fields.');
+        return res.status(400).json({ error: 'Invalid subscription format: missing or invalid required fields.' });
     }
 
     try {
@@ -78,9 +66,9 @@ app.post('/api/push/subscribe', async (req, res) => {
                 endpoint: subscription.endpoint,
                 p256dh: subscription.keys.p256dh,
                 auth: subscription.keys.auth,
-                user_chapa: user_chapa 
+                user_chapa: user_chapa // Guardar la chapa si se proporciona
             }, {
-                onConflict: 'endpoint'
+                onConflict: 'endpoint' 
             });
 
         if (error) {
@@ -88,7 +76,7 @@ app.post('/api/push/subscribe', async (req, res) => {
             return res.status(500).json({ error: 'Failed to save subscription in database.' });
         }
 
-        console.log('Suscripción registrada/actualizada en Supabase:', subscription.endpoint);
+        console.log('Suscripción registrada/actualizada en Supabase:', subscription.endpoint, user_chapa ? `(chapa: ${user_chapa})` : '(sin chapa)');
         res.status(201).json({ message: 'Subscription saved and persisted.' });
 
     } catch (e) {
@@ -128,7 +116,7 @@ app.post('/api/push/unsubscribe', async (req, res) => {
 
 // 3. Ruta para ENVIAR una notificación de "Nueva Contratación" (llamada por la Edge Function)
 app.post('/api/push/notify-new-hire', async (req, res) => {
-    const { title, body, url, chapa_target = null } = req.body; 
+    const { title, body, url, chapa_target = null } = req.body; // 'chapa_target' vendrá de la Edge Function
     
     // 1. Obtener todas las suscripciones persistentes de Supabase
     let { data: subscriptions, error } = await supabase
@@ -140,19 +128,17 @@ app.post('/api/push/notify-new-hire', async (req, res) => {
         return res.status(500).json({ error: 'Failed to retrieve subscriptions.' });
     }
 
-    if (!subscriptions || subscriptions.length === 0) {
-        console.log('No hay suscriptores registrados en Supabase para enviar la notificación.');
-        return res.status(200).json({ message: 'No active subscriptions to notify.' });
-    }
+    let targetSubscriptions = subscriptions || []; // Asegurarse de que sea un array vacío si es null
 
-    // Opcional: Filtrar por chapa si la Edge Function envía un user_chapa específico
-    let targetSubscriptions = subscriptions;
+    // Opcional: Filtrar por chapa si la Edge Function envió un chapa_target específico
     if (chapa_target) {
-        targetSubscriptions = subscriptions.filter(sub => sub.user_chapa === chapa_target.toString());
+        targetSubscriptions = targetSubscriptions.filter(sub => sub.user_chapa === chapa_target.toString());
         console.log(`Filtrando notificaciones para chapa_target: ${chapa_target}. Suscripciones encontradas: ${targetSubscriptions.length}`);
         if (targetSubscriptions.length === 0) {
             return res.status(200).json({ message: `No active subscriptions found for chapa_target: ${chapa_target}.` });
         }
+    } else {
+        console.log('No se proporcionó chapa_target. Enviando a TODOS los suscriptores.');
     }
 
 
@@ -174,10 +160,10 @@ app.post('/api/push/notify-new-hire', async (req, res) => {
         };
         try {
             await webpush.sendNotification(pushSubscription, payload);
-            console.log(`Notificación enviada a suscriptor ${index + 1} (${sub.endpoint})`);
+            console.log(`Notificación enviada a suscriptor ${index + 1} (chapa: ${sub.user_chapa || 'N/A'})`);
             return { endpoint: sub.endpoint, status: 'success', remove: false };
         } catch (error) {
-            console.error(`Error enviando notificación a suscriptor ${index + 1} (${sub.endpoint}):`, error);
+            console.error(`Error enviando notificación a suscriptor ${index + 1} (chapa: ${sub.user_chapa || 'N/A'}, endpoint: ${sub.endpoint}):`, error);
             if (error.statusCode === 410 || error.statusCode === 404) {
                 console.log(`Suscripción inválida/expirada eliminada de BD: ${sub.endpoint}`);
                 await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
@@ -187,7 +173,7 @@ app.post('/api/push/notify-new-hire', async (req, res) => {
         }
     });
 
-    await Promise.allSettled(notificationsPromises); // Usar allSettled para que no falle todo si una notificación falla
+    await Promise.allSettled(notificationsPromises); 
 
     console.log(`Finalizado el envío de notificaciones.`);
     res.status(200).json({ 
