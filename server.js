@@ -2,45 +2,29 @@ const express = require('express');
 const webpush = require('web-push');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-// Importar el cliente de Supabase
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-// =========================================================================
-// Configuración de CORS para desarrollo local o frontend desplegado.
-// Debería permitir 'http://localhost:8080' y 'http://127.0.0.1:8080' para desarrollo.
-// En producción, debería ser la URL de tu frontend desplegado (ej. 'https://tu-pwa.com').
-// =========================================================================
 app.use(cors({
     origin: ['http://localhost:8080', 'http://127.0.0.1:8080'], // Para desarrollo local
     methods: ['GET', 'POST', 'PUT', 'DELETE'], 
     allowedHeaders: ['Content-Type', 'Authorization'] 
 }));
 
+// ¡CRUCIAL! body-parser debe estar ANTES de definir cualquier ruta.
 app.use(bodyParser.json());
 
-// =========================================================================
-// ¡Inicialización de Supabase para el backend!
-// Estas variables de entorno (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-// DEBEN CONFIGURARSE en Vercel.
-// =========================================================================
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {
     console.error("ERROR: Las credenciales de Supabase (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) no están configuradas en las variables de entorno.");
-    // No salir en desarrollo, pero es crítico en producción
-    // process.exit(1);
 }
 
 const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
 
-// =========================================================================
-// Configuración de Web-Push (claves VAPID y email leídos de variables de entorno)
-// (DEBES CONFIGURAR VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY y WEB_PUSH_EMAIL en Vercel!)
-// =========================================================================
 const vapidKeys = {
     publicKey: process.env.VAPID_PUBLIC_KEY, 
     privateKey: process.env.VAPID_PRIVATE_KEY, 
@@ -59,36 +43,49 @@ webpush.setVapidDetails(
     vapidKeys.privateKey
 );
 
-// ===============================================
-// RUTAS DE LA API PARA NOTIFICACIONES PUSH (Ahora con persistencia en Supabase)
-// ===============================================
-
 // 1. Ruta para guardar la suscripción del usuario (desde el frontend)
 app.post('/api/push/subscribe', async (req, res) => {
     const subscription = req.body;
-    // El frontend no siempre envía user_chapa, así que puede ser null o undefined
     const user_chapa = req.body.user_chapa || null; // Opcional
 
-    if (!subscription || !subscription.endpoint || !subscription.keys || !subscription.keys.p256dh || !subscription.keys.auth) {
-        return res.status(400).json({ error: 'Invalid subscription format.' });
+    console.log('Received subscription request. Body:', subscription); // DEBUG: Qué recibe el servidor
+
+    if (!subscription || typeof subscription !== 'object') {
+        console.error('Invalid subscription: Body is not an object.');
+        return res.status(400).json({ error: 'Invalid subscription format: body must be a JSON object.' });
+    }
+    if (!subscription.endpoint || typeof subscription.endpoint !== 'string') {
+        console.error('Invalid subscription: Missing or invalid endpoint.');
+        return res.status(400).json({ error: 'Invalid subscription format: missing or invalid endpoint.' });
+    }
+    if (!subscription.keys || typeof subscription.keys !== 'object') {
+        console.error('Invalid subscription: Missing or invalid keys object.');
+        return res.status(400).json({ error: 'Invalid subscription format: missing or invalid keys object.' });
+    }
+    if (!subscription.keys.p256dh || typeof subscription.keys.p256dh !== 'string') {
+        console.error('Invalid subscription: Missing or invalid p256dh key.');
+        return res.status(400).json({ error: 'Invalid subscription format: missing or invalid p256dh key.' });
+    }
+    if (!subscription.keys.auth || typeof subscription.keys.auth !== 'string') {
+        console.error('Invalid subscription: Missing or invalid auth key.');
+        return res.status(400).json({ error: 'Invalid subscription format: missing or invalid auth key.' });
     }
 
     try {
-        // Intentar insertar la suscripción en Supabase
         const { data, error } = await supabase
             .from('push_subscriptions')
             .upsert({
                 endpoint: subscription.endpoint,
                 p256dh: subscription.keys.p256dh,
                 auth: subscription.keys.auth,
-                user_chapa: user_chapa // Guardar la chapa si se proporciona
+                user_chapa: user_chapa 
             }, {
-                onConflict: 'endpoint' // Si el endpoint ya existe, actualiza (no crea duplicados)
+                onConflict: 'endpoint'
             });
 
         if (error) {
             console.error('Error al guardar suscripción en Supabase:', error);
-            return res.status(500).json({ error: 'Failed to save subscription.' });
+            return res.status(500).json({ error: 'Failed to save subscription in database.' });
         }
 
         console.log('Suscripción registrada/actualizada en Supabase:', subscription.endpoint);
@@ -96,7 +93,7 @@ app.post('/api/push/subscribe', async (req, res) => {
 
     } catch (e) {
         console.error('Excepción al suscribir:', e);
-        res.status(500).json({ error: 'Internal server error during subscription.' });
+        res.status(500).json({ error: 'Internal server error during subscription process.' });
     }
 });
 
@@ -104,7 +101,8 @@ app.post('/api/push/subscribe', async (req, res) => {
 app.post('/api/push/unsubscribe', async (req, res) => {
     const endpointToRemove = req.body.endpoint;
 
-    if (!endpointToRemove) {
+    if (!endpointToRemove || typeof endpointToRemove !== 'string') {
+        console.error('Invalid unsubscription request: Missing or invalid endpoint.');
         return res.status(400).json({ error: 'Endpoint is required for unsubscription.' });
     }
 
@@ -116,7 +114,7 @@ app.post('/api/push/unsubscribe', async (req, res) => {
 
         if (error) {
             console.error('Error al eliminar suscripción de Supabase:', error);
-            return res.status(500).json({ error: 'Failed to remove subscription.' });
+            return res.status(500).json({ error: 'Failed to remove subscription from database.' });
         }
 
         console.log('Suscripción eliminada de Supabase:', endpointToRemove);
@@ -124,7 +122,7 @@ app.post('/api/push/unsubscribe', async (req, res) => {
 
     } catch (e) {
         console.error('Excepción al desuscribir:', e);
-        res.status(500).json({ error: 'Internal server error during unsubscription.' });
+        res.status(500).json({ error: 'Internal server error during unsubscription process.' });
     }
 });
 
@@ -180,10 +178,8 @@ app.post('/api/push/notify-new-hire', async (req, res) => {
             return { endpoint: sub.endpoint, status: 'success', remove: false };
         } catch (error) {
             console.error(`Error enviando notificación a suscriptor ${index + 1} (${sub.endpoint}):`, error);
-            // Si la suscripción falla (Gone: 410, Not Found: 404), marcar para eliminar
             if (error.statusCode === 410 || error.statusCode === 404) {
-                console.log(`Suscripción inválida/expirada eliminada: ${sub.endpoint}`);
-                // Eliminarla directamente de la base de datos
+                console.log(`Suscripción inválida/expirada eliminada de BD: ${sub.endpoint}`);
                 await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
                 return { endpoint: sub.endpoint, status: 'failed', remove: true };
             }
@@ -191,18 +187,13 @@ app.post('/api/push/notify-new-hire', async (req, res) => {
         }
     });
 
-    const results = await Promise.all(notificationsPromises);
+    await Promise.allSettled(notificationsPromises); // Usar allSettled para que no falle todo si una notificación falla
 
-    // Opcional: Podrías querer loggear o responder con los resultados detallados
+    console.log(`Finalizado el envío de notificaciones.`);
     res.status(200).json({ 
-        message: 'Notifications sent.', 
-        totalAttempted: targetSubscriptions.length,
-        totalSent: results.filter(r => r.status === 'success').length,
-        totalRemoved: results.filter(r => r.remove).length,
-        // results: results // Descomentar para debug detallado de cada resultado
+        message: 'Notifications process initiated. Check logs for individual results.', 
     });
 });
-
 
 app.listen(port, () => {
     console.log(`Backend de notificaciones corriendo en http://localhost:${port}`);
