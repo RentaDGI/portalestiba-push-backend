@@ -1,30 +1,19 @@
+// server.js (o index.js) COMPLETO Y ACTUALIZADO
 const express = require('express');
 const webpush = require('web-push');
 const bodyParser = require('body-parser');
-const cors = require('cors');
+const cors = require('cors'); // Asegúrate de que esto esté en package.json
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const port = process.env.PORT || 5000;
 
 // --- INICIO DE LA MODIFICACIÓN ---
-
-// URL de tu PWA en GitHub Pages (obtenida del error CORS)
-const productionOrigin = 'https://rentadgi.github.io';
-
-app.use(cors({
-    // Añadimos la URL de producción a la lista de orígenes permitidos
-    origin: [
-        'http://localhost:8080', // Para desarrollo local
-        'http://127.0.0.1:8080', // Para desarrollo local
-        productionOrigin         // <-- AÑADIDO: Tu PWA en producción
-    ], 
-    methods: ['GET', 'POST', 'PUT', 'DELETE'], 
-    allowedHeaders: ['Content-Type', 'Authorization'] 
-}));
-
+// Habilitar CORS para TODOS los orígenes.
+// Esto es más simple y solucionará el error 'Access-Control-Allow-Origin'.
+// IMPORTANTE: Pon esto ANTES de app.use(bodyParser.json());
+app.use(cors());
 // --- FIN DE LA MODIFICACIÓN ---
-
 
 app.use(bodyParser.json());
 
@@ -32,7 +21,7 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {
-    console.error("ERROR: Las credenciales de Supabase (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) no están configuradas en las variables de entorno.");
+     console.error("ERROR: Las credenciales de Supabase (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) no están configuradas en las variables de entorno.");
 }
 
 const supabase = createClient(supabaseUrl, supabaseServiceRoleKey);
@@ -58,7 +47,6 @@ webpush.setVapidDetails(
 // 1. Ruta para guardar la suscripción del usuario (desde el frontend)
 app.post('/api/push/subscribe', async (req, res) => {
     const subscription = req.body;
-    // Capturamos user_chapa del body, si viene (lo añadiremos en el frontend)
     const user_chapa = req.body.user_chapa || null; 
 
     console.log('Received subscription request. Body:', subscription);
@@ -79,7 +67,7 @@ app.post('/api/push/subscribe', async (req, res) => {
                 endpoint: subscription.endpoint,
                 p256dh: subscription.keys.p256dh,
                 auth: subscription.keys.auth,
-                user_chapa: user_chapa // Guardar la chapa si se proporciona
+                user_chapa: user_chapa
             }, {
                 onConflict: 'endpoint' 
             });
@@ -129,9 +117,8 @@ app.post('/api/push/unsubscribe', async (req, res) => {
 
 // 3. Ruta para ENVIAR una notificación de "Nueva Contratación" (llamada por la Edge Function)
 app.post('/api/push/notify-new-hire', async (req, res) => {
-    const { title, body, url, chapa_target = null } = req.body; // 'chapa_target' vendrá de la Edge Function
+    const { title, body, url, chapa_target = null } = req.body;
     
-    // 1. Obtener todas las suscripciones persistentes de Supabase
     let { data: subscriptions, error } = await supabase
         .from('push_subscriptions')
         .select('*');
@@ -141,9 +128,8 @@ app.post('/api/push/notify-new-hire', async (req, res) => {
         return res.status(500).json({ error: 'Failed to retrieve subscriptions.' });
     }
 
-    let targetSubscriptions = subscriptions || []; // Asegurarse de que sea un array vacío si es null
+    let targetSubscriptions = subscriptions || []; 
 
-    // Opcional: Filtrar por chapa si la Edge Function envió un chapa_target específico
     if (chapa_target) {
         targetSubscriptions = targetSubscriptions.filter(sub => sub.user_chapa === chapa_target.toString());
         console.log(`Filtrando notificaciones para chapa_target: ${chapa_target}. Suscripciones encontradas: ${targetSubscriptions.length}`);
@@ -153,7 +139,6 @@ app.post('/api/push/notify-new-hire', async (req, res) => {
     } else {
         console.log('No se proporcionó chapa_target. Enviando a TODOS los suscriptores.');
     }
-
 
     const payload = JSON.stringify({
         title: title || '¡Nueva Contratación Disponible!',
@@ -168,7 +153,7 @@ app.post('/api/push/notify-new-hire', async (req, res) => {
             endpoint: sub.endpoint,
             keys: {
                 p256dh: sub.p256dh,
-controllo               auth: sub.auth
+                auth: sub.auth
             }
         };
         try {
