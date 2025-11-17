@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Convertir Trincadores CSV a SQL - Portal Estiba</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1rem;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .section {
+            margin-bottom: 30px;
+        }
+
+        .section h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .info-box {
+            background: #f0f4ff;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+
+        .info-box.warning {
+            background: #fff4e6;
+            border-left-color: #ff9800;
+        }
+
+        .info-box.success {
+            background: #e8f5e9;
+            border-left-color: #4caf50;
+        }
+
+        .info-box code {
+            background: rgba(0, 0, 0, 0.05);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            resize: vertical;
+            transition: border-color 0.3s;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        #sqlOutput {
+            min-height: 300px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #4caf50;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+        }
+
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #da190b;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .stat-card .number {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-card .label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        .example {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #4caf50;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            display: none;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .toast.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚡ Convertidor de Trincadores CSV a SQL</h1>
+            <p>Importa los datos de especialidad de trincadores desde Google Sheets</p>
+        </div>
+
+        <div class="content">
+            <!-- Instrucciones -->
+            <div class="section">
+                <h2>📋 Instrucciones</h2>
+                <div class="info-box">
+                    <strong>Formato esperado del CSV:</strong>
+                    <div class="example">pos,chapa,trinca
+1,221,T
+2,330,
+3,190,T
+4,450,</div>
+                </div>
+                <div class="info-box warning">
+                    <strong>⚠️ Importante:</strong> Solo los usuarios de <strong>SP (posiciones 1-449)</strong> pueden ser trincadores. Los datos de OC (450-535) serán ignorados automáticamente.
+                </div>
+                <ol style="margin-left: 20px; margin-top: 15px;">
+                    <li>Copia los datos de tu Google Sheet (incluyendo el encabezado)</li>
+                    <li>Pega los datos en el área de texto de abajo</li>
+                    <li>Haz clic en "Convertir a SQL"</li>
+                    <li>Copia el SQL generado y ejecútalo en Supabase SQL Editor</li>
+                </ol>
+            </div>
+
+            <!-- Input CSV -->
+            <div class="section">
+                <h2>📝 Paso 1: Pega tus datos CSV aquí</h2>
+                <textarea id="csvInput" placeholder="pos,chapa,trinca
+1,221,T
+2,330,
+3,190,T"></textarea>
+                <div class="button-group">
+                    <button class="btn-primary" onclick="convertToSQL()">
+                        🔄 Convertir a SQL
+                    </button>
+                    <button class="btn-danger" onclick="clearAll()">
+                        🗑️ Limpiar Todo
+                    </button>
+                </div>
+            </div>
+
+            <!-- Estadísticas -->
+            <div class="section" id="statsSection" style="display: none;">
+                <h2>📊 Estadísticas</h2>
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="number" id="totalRows">0</div>
+                        <div class="label">Total Filas</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number" id="totalTrincadores">0</div>
+                        <div class="label">Trincadores (SP)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="number" id="totalIgnorados">0</div>
+                        <div class="label">Ignorados (OC)</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Output SQL -->
+            <div class="section" id="sqlSection" style="display: none;">
+                <h2>✅ Paso 2: SQL Generado</h2>
+                <div class="info-box success">
+                    <strong>✓ SQL generado correctamente!</strong> Copia el código de abajo y ejecútalo en el <strong>Supabase SQL Editor</strong>.
+                </div>
+                <textarea id="sqlOutput" readonly></textarea>
+                <div class="button-group">
+                    <button class="btn-secondary" onclick="copyToClipboard()">
+                        📋 Copiar SQL
+                    </button>
+                    <button class="btn-primary" onclick="downloadSQL()">
+                        💾 Descargar SQL
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast">¡SQL copiado al portapapeles!</div>
+
+    <script>
+        const LIMITE_SP = 449; // Posiciones 1-449 son SP
+        const INICIO_OC = 450; // Posiciones 450-535 son OC
+
+        function convertToSQL() {
+            const csvInput = document.getElementById('csvInput').value.trim();
+
+            if (!csvInput) {
+                alert('Por favor, pega los datos CSV primero.');
+                return;
+            }
+
+            // Parsear CSV
+            const lines = csvInput.split('\n');
+            const headers = lines[0].toLowerCase().split(',').map(h => h.trim());
+
+            // Validar headers
+            if (!headers.includes('pos') || !headers.includes('chapa') || !headers.includes('trinca')) {
+                alert('El CSV debe tener las columnas: pos, chapa, trinca');
+                return;
+            }
+
+            const posIndex = headers.indexOf('pos');
+            const chapaIndex = headers.indexOf('chapa');
+            const trincaIndex = headers.indexOf('trinca');
+
+            let chapasTrincadores = [];
+            let totalRows = 0;
+            let totalIgnorados = 0;
+
+            // Procesar datos
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+
+                const values = line.split(',');
+                totalRows++;
+
+                const pos = parseInt(values[posIndex]?.trim());
+                const chapa = values[chapaIndex]?.trim();
+                const trinca = values[trincaIndex]?.trim().toUpperCase();
+
+                // Validar que sea SP (1-449) y tenga especialidad T
+                if (pos >= 1 && pos <= LIMITE_SP && trinca === 'T' && chapa) {
+                    chapasTrincadores.push(chapa);
+                } else if (pos >= INICIO_OC && trinca === 'T') {
+                    totalIgnorados++;
+                }
+            }
+
+            // Generar SQL
+            let sql = `-- =====================================================
+-- ACTUALIZAR TRINCADORES EN TABLA CENSO
+-- =====================================================
+-- Generado automáticamente desde CSV
+-- Fecha: ${new Date().toLocaleString('es-ES')}
+-- Total de trincadores (SP): ${chapasTrincadores.length}
+-- Total ignorados (OC): ${totalIgnorados}
+-- =====================================================
+
+-- PASO 1: Resetear todos los trincadores a FALSE
+UPDATE censo
+SET trincador = FALSE;
+
+-- PASO 2: Marcar las chapas que SÍ son trincadores (solo SP)
+`;
+
+            if (chapasTrincadores.length > 0) {
+                // Dividir en bloques de 100 chapas para evitar consultas muy largas
+                const chunkSize = 100;
+                for (let i = 0; i < chapasTrincadores.length; i += chunkSize) {
+                    const chunk = chapasTrincadores.slice(i, i + chunkSize);
+                    const chapasList = chunk.map(c => `'${c}'`).join(', ');
+
+                    sql += `\n-- Bloque ${Math.floor(i / chunkSize) + 1} (chapas ${i + 1}-${Math.min(i + chunkSize, chapasTrincadores.length)})
+UPDATE censo
+SET trincador = TRUE
+WHERE chapa IN (${chapasList})
+  AND posicion BETWEEN 1 AND ${LIMITE_SP};  -- Solo SP
+
+`;
+                }
+
+                sql += `
+-- =====================================================
+-- VERIFICACIÓN
+-- =====================================================
+
+-- Ver total de trincadores actualizados
+SELECT COUNT(*) as total_trincadores
+FROM censo
+WHERE trincador = TRUE;
+
+-- Ver listado de trincadores
+SELECT chapa, posicion, trincador
+FROM censo
+WHERE trincador = TRUE
+ORDER BY posicion;
+
+-- Ver resumen por fecha
+SELECT fecha, COUNT(*) as trincadores
+FROM censo
+WHERE trincador = TRUE
+GROUP BY fecha
+ORDER BY fecha DESC;
+`;
+            } else {
+                sql += `\n-- ⚠️ No se encontraron trincadores en SP (posiciones 1-449)
+-- Verifica que el CSV tenga datos correctos.
+`;
+            }
+
+            // Mostrar resultados
+            document.getElementById('sqlOutput').value = sql;
+            document.getElementById('sqlSection').style.display = 'block';
+            document.getElementById('statsSection').style.display = 'block';
+
+            // Actualizar estadísticas
+            document.getElementById('totalRows').textContent = totalRows;
+            document.getElementById('totalTrincadores').textContent = chapasTrincadores.length;
+            document.getElementById('totalIgnorados').textContent = totalIgnorados;
+
+            // Scroll al resultado
+            document.getElementById('sqlSection').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function copyToClipboard() {
+            const sqlOutput = document.getElementById('sqlOutput');
+            sqlOutput.select();
+            document.execCommand('copy');
+
+            showToast('¡SQL copiado al portapapeles!');
+        }
+
+        function downloadSQL() {
+            const sql = document.getElementById('sqlOutput').value;
+            const blob = new Blob([sql], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `actualizar_trincadores_${new Date().toISOString().split('T')[0]}.sql`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+
+            showToast('¡SQL descargado!');
+        }
+
+        function clearAll() {
+            if (confirm('¿Estás seguro de que quieres limpiar todos los datos?')) {
+                document.getElementById('csvInput').value = '';
+                document.getElementById('sqlOutput').value = '';
+                document.getElementById('sqlSection').style.display = 'none';
+                document.getElementById('statsSection').style.display = 'none';
+            }
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Permitir Ctrl+Enter para convertir
+        document.getElementById('csvInput').addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'Enter') {
+                convertToSQL();
+            }
+        });
+    </script>
+</body>
+</html>

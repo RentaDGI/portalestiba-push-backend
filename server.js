@@ -299,17 +299,33 @@ app.get('/api/trincadores/contar', async (req, res) => {
 
         const resultado = data[0];
 
-        console.log(`✅ Resultado: ${resultado.trincadores_hasta_posicion} trincadores, posición ${resultado.posicion_usuario}, ${resultado.es_sp ? 'SP' : 'OC'}`);
+        // IMPORTANTE: Solo usuarios de SP (posiciones 1-449) tienen trincadores
+        // Los usuarios de OC (450-535) NO deben ver esta funcionalidad
+        if (!resultado.es_sp) {
+            console.log(`⚠️ Usuario de OC (posición ${resultado.posicion_usuario}) - No aplica funcionalidad de trincadores`);
+            return res.status(200).json({
+                success: false,
+                disponible: false,
+                mensaje: 'La funcionalidad de trincadores solo está disponible para Servicio Público (SP)',
+                chapa: chapa,
+                posicion_usuario: resultado.posicion_usuario,
+                es_sp: false,
+                tipo: 'Operaciones Complementarias'
+            });
+        }
+
+        console.log(`✅ Resultado: ${resultado.trincadores_hasta_posicion} trincadores, posición ${resultado.posicion_usuario}, SP`);
 
         res.status(200).json({
             success: true,
+            disponible: true,
             chapa: chapa,
             fecha: fechaCenso,
             trincadores_hasta_posicion: resultado.trincadores_hasta_posicion,
             posicion_usuario: resultado.posicion_usuario,
             posicion_puerta: parseInt(posicion_puerta),
             es_sp: resultado.es_sp,
-            tipo: resultado.es_sp ? 'Servicio Público' : 'Operaciones Complementarias'
+            tipo: 'Servicio Público'
         });
 
     } catch (e) {
