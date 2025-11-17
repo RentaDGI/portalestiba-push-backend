@@ -175,6 +175,255 @@ app.post('/api/push/notify-new-hire', async (req, res) => {
         message: 'Notifications process initiated. Check logs for individual results.', 
     });
 });
+// =====================================================
+// ENDPOINTS PARA TRINCADORES
+// =====================================================
+// Añadir estos endpoints al server.js antes de app.listen()
+
+// 4. Ruta para ACTUALIZAR trincadores desde Google Sheets
+app.post('/api/trincadores/update', async (req, res) => {
+    const { sheets_url, chapas_trincadores } = req.body;
+
+    try {
+        let chapasArray = [];
+
+        // Opción 1: Recibir array directamente desde el frontend
+        if (chapas_trincadores && Array.isArray(chapas_trincadores)) {
+            chapasArray = chapas_trincadores;
+            console.log(`Actualizando ${chapasArray.length} trincadores desde array proporcionado`);
+        }
+        // Opción 2: Leer desde Google Sheets URL
+        else if (sheets_url) {
+            console.log(`Leyendo trincadores desde Google Sheets: ${sheets_url}`);
+
+            const response = await fetch(sheets_url, {
+                cache: 'no-store'
+            });
+
+            if (!response.ok) {
+                throw new Error(`Error al obtener Google Sheets: ${response.status} ${response.statusText}`);
+            }
+
+            const csvText = await response.text();
+            const rows = csvText.split('\n').slice(1); // Saltar header
+
+            // Procesar CSV: pos, chapa, especialidad
+            chapasArray = rows
+                .map(row => {
+                    const [pos, chapa, especialidad] = row.split(',');
+                    return {
+                        chapa: chapa?.trim(),
+                        especialidad: especialidad?.trim().toUpperCase()
+                    };
+                })
+                .filter(item => item.chapa && item.especialidad === 'T')
+                .map(item => item.chapa);
+
+            console.log(`Encontrados ${chapasArray.length} trincadores en Google Sheets`);
+        } else {
+            return res.status(400).json({
+                error: 'Debe proporcionar "sheets_url" o "chapas_trincadores"'
+            });
+        }
+
+        // Actualizar en Supabase usando la función SQL
+        const { data, error } = await supabase.rpc(
+            'actualizar_trincadores_desde_array',
+            { chapas_trincadores: chapasArray }
+        );
+
+        if (error) {
+            console.error('Error al actualizar trincadores en Supabase:', error);
+            return res.status(500).json({
+                error: 'Error al actualizar trincadores en base de datos',
+                details: error.message
+            });
+        }
+
+        console.log(`✅ Trincadores actualizados exitosamente: ${data} registros`);
+
+        res.status(200).json({
+            success: true,
+            registros_actualizados: data,
+            total_trincadores: chapasArray.length,
+            chapas: chapasArray
+        });
+
+    } catch (e) {
+        console.error('Excepción al actualizar trincadores:', e);
+        res.status(500).json({
+            error: 'Error interno del servidor',
+            details: e.message
+        });
+    }
+});
+
+// 5. Ruta para CONTAR trincadores hasta la posición del usuario
+app.get('/api/trincadores/contar', async (req, res) => {
+    const { chapa, posicion_puerta, fecha } = req.query;
+
+    if (!chapa || !posicion_puerta) {
+        return res.status(400).json({
+            error: 'Parámetros requeridos: chapa, posicion_puerta'
+        });
+    }
+
+    try {
+        const fechaCenso = fecha || new Date().toISOString().split('T')[0];
+
+        console.log(`Contando trincadores para chapa ${chapa}, puerta ${posicion_puerta}, fecha ${fechaCenso}`);
+
+        // Llamar a la función SQL que detecta automáticamente SP/OC
+        const { data, error } = await supabase.rpc(
+            'contar_trincadores_hasta_usuario',
+            {
+                fecha_censo: fechaCenso,
+                chapa_usuario: chapa,
+                posicion_puerta: parseInt(posicion_puerta)
+            }
+        );
+
+        if (error) {
+            console.error('Error al contar trincadores:', error);
+            return res.status(500).json({
+                error: 'Error al contar trincadores',
+                details: error.message
+            });
+        }
+
+        if (!data || data.length === 0) {
+            return res.status(404).json({
+                error: `No se encontró la chapa ${chapa} en el censo de fecha ${fechaCenso}`
+            });
+        }
+
+        const resultado = data[0];
+
+        console.log(`✅ Resultado: ${resultado.trincadores_hasta_posicion} trincadores, posición ${resultado.posicion_usuario}, ${resultado.es_sp ? 'SP' : 'OC'}`);
+
+        res.status(200).json({
+            success: true,
+            chapa: chapa,
+            fecha: fechaCenso,
+            trincadores_hasta_posicion: resultado.trincadores_hasta_posicion,
+            posicion_usuario: resultado.posicion_usuario,
+            posicion_puerta: parseInt(posicion_puerta),
+            es_sp: resultado.es_sp,
+            tipo: resultado.es_sp ? 'Servicio Público' : 'Operaciones Complementarias'
+        });
+
+    } catch (e) {
+        console.error('Excepción al contar trincadores:', e);
+        res.status(500).json({
+            error: 'Error interno del servidor',
+            details: e.message
+        });
+    }
+});
+
+// 6. Ruta para obtener RESUMEN de trincadores por fecha
+app.get('/api/trincadores/resumen', async (req, res) => {
+    const { fecha } = req.query;
+
+    try {
+        const fechaCenso = fecha || new Date().toISOString().split('T')[0];
+
+        console.log(`Obteniendo resumen de trincadores para fecha: ${fechaCenso}`);
+
+        // Consultar la vista de resumen
+        const { data, error } = await supabase
+            .from('vista_trincadores_resumen')
+            .select('*')
+            .eq('fecha', fechaCenso)
+            .single();
+
+        if (error) {
+            // Si no hay datos para esa fecha, retornar estructura vacía
+            if (error.code === 'PGRST116') {
+                return res.status(200).json({
+                    success: true,
+                    fecha: fechaCenso,
+                    total_trincadores: 0,
+                    trincadores_sp: 0,
+                    trincadores_oc: 0,
+                    trincadores_no_disponibles: 0,
+                    trincadores_disponibles: 0,
+                    message: 'No hay datos de trincadores para esta fecha'
+                });
+            }
+
+            console.error('Error al obtener resumen de trincadores:', error);
+            return res.status(500).json({
+                error: 'Error al obtener resumen de trincadores',
+                details: error.message
+            });
+        }
+
+        console.log(`✅ Resumen obtenido: ${data.total_trincadores} trincadores totales`);
+
+        res.status(200).json({
+            success: true,
+            ...data
+        });
+
+    } catch (e) {
+        console.error('Excepción al obtener resumen de trincadores:', e);
+        res.status(500).json({
+            error: 'Error interno del servidor',
+            details: e.message
+        });
+    }
+});
+
+// 7. Ruta para obtener LISTA de trincadores disponibles
+app.get('/api/trincadores/lista', async (req, res) => {
+    const { fecha, disponibles_solo } = req.query;
+
+    try {
+        const fechaCenso = fecha || new Date().toISOString().split('T')[0];
+        const soloDisponibles = disponibles_solo === 'true';
+
+        console.log(`Obteniendo lista de trincadores para fecha: ${fechaCenso}, solo disponibles: ${soloDisponibles}`);
+
+        let query = supabase
+            .from('censo')
+            .select('chapa, posicion, color, estado, observaciones')
+            .eq('fecha', fechaCenso)
+            .eq('trincador', true)
+            .order('posicion', { ascending: true });
+
+        // Filtrar solo disponibles (excluir color red)
+        if (soloDisponibles) {
+            query = query.neq('color', 'red');
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+            console.error('Error al obtener lista de trincadores:', error);
+            return res.status(500).json({
+                error: 'Error al obtener lista de trincadores',
+                details: error.message
+            });
+        }
+
+        console.log(`✅ Encontrados ${data.length} trincadores`);
+
+        res.status(200).json({
+            success: true,
+            fecha: fechaCenso,
+            total: data.length,
+            trincadores: data
+        });
+
+    } catch (e) {
+        console.error('Excepción al obtener lista de trincadores:', e);
+        res.status(500).json({
+            error: 'Error interno del servidor',
+            details: e.message
+        });
+    }
+});
 
 app.listen(port, () => {
     console.log(`Backend de notificaciones corriendo en http://localhost:${port}`);
