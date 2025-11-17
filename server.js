@@ -139,7 +139,8 @@ app.post('/api/push/notify-new-hire', async (req, res) => {
     const payload = JSON.stringify({
         title: title || '¡Nueva Contratación Disponible!',
         body: body || 'Revisa los detalles de la última incorporación a nuestro equipo.',
-        url: url || '/#contratacion', // <-- ¡CAMBIADO! Añade el hash
+        url: url || '/?page=contratacion', // URL con query parameter para navegacion automatica
+        page: 'contratacion' // Pagina de destino para el service worker
     });
     // --- FIN DE LA MODIFICACIÓN ---
 
