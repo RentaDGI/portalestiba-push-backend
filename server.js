@@ -1,14 +1,19 @@
+// server.js (o index.js) COMPLETO Y ACTUALIZADO
 const express = require('express');
 const webpush = require('web-push');
 const bodyParser = require('body-parser');
-const cors = require('cors');
+const cors = require('cors'); // Asegúrate de que esto esté en package.json
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-// Habilitar CORS para TODOS los orígenes (como lo dejamos)
+// --- INICIO DE LA MODIFICACIÓN ---
+// Habilitar CORS para TODOS los orígenes.
+// Esto es más simple y solucionará el error 'Access-Control-Allow-Origin'.
+// IMPORTANTE: Pon esto ANTES de app.use(bodyParser.json());
 app.use(cors());
+// --- FIN DE LA MODIFICACIÓN ---
 
 app.use(bodyParser.json());
 
@@ -135,13 +140,11 @@ app.post('/api/push/notify-new-hire', async (req, res) => {
         console.log('No se proporcionó chapa_target. Enviando a TODOS los suscriptores.');
     }
 
-    // --- INICIO DE LA MODIFICACIÓN ---
     const payload = JSON.stringify({
         title: title || '¡Nueva Contratación Disponible!',
         body: body || 'Revisa los detalles de la última incorporación a nuestro equipo.',
-        url: url || '/#contratacion', // <-- ¡CAMBIADO! Añade el hash
+        url: url || '/', 
     });
-    // --- FIN DE LA MODIFICACIÓN ---
 
     console.log(`Enviando notificación a ${targetSubscriptions.length} suscriptores persistentes...`);
 
